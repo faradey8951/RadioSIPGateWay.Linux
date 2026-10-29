@@ -51,7 +51,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             // Share the transport with a SIPUserAgent so INVITE requests can be observed.
             // Media is not implemented in this milestone, so incoming calls are rejected safely.
             _callUserAgent = new SIPUserAgent(transport, null, true);
-            _callUserAgent.OnIncomingCall += HandleIncomingCallAsync;
+            _callUserAgent.OnIncomingCall += HandleIncomingCall;
 
             _retryWorker = Task.Run(RetryWorkerAsync);
             StartRegistrationAgent();
@@ -120,10 +120,10 @@ internal sealed class SipRegistrationService : IAsyncDisposable
         agent.Start();
     }
 
-    private Task HandleIncomingCallAsync(SIPUserAgent userAgent, SIPRequest request)
+    private void HandleIncomingCall(SIPUserAgent userAgent, SIPRequest request)
     {
         if (request == null || _stopping || _transport == null)
-            return Task.CompletedTask;
+            return;
 
         string caller = "неизвестный абонент";
         string target = "неизвестный адрес";
@@ -148,7 +148,6 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             _log($"SIP: ошибка обработки входящего INVITE от {caller}: {ex.Message}");
         }
 
-        return Task.CompletedTask;
     }
 
     private void QueueRetry()
