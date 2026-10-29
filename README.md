@@ -36,3 +36,8 @@ dotnet run --project src/RadioSipGateway.Linux -- --check-config --config config
 - `--self-test-dtmf` проверяет декодирование синтетических тонов без звукового оборудования.
 - Декодер пока не подключён к ALSA/SIP аудиотракту: это следующий этап интеграции.
 - Пилот-тон не переносится.
+
+
+## Stage 6: RTP test without music
+
+The test-only incoming-call media source is explicitly set to `Silence`. This validates SIP/SDP/RTP negotiation without sending music or test tones. It does not implement the ALSA audio bridge or CM108 PTT. See `docs/SIP_RTP_TEST_RU.md`.

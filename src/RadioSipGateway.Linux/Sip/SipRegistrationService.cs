@@ -2,6 +2,7 @@ using System.Net;
 using System.Threading.Channels;
 using RadioSipGateway.Linux.Configuration;
 using SIPSorcery.Media;
+using SIPSorceryMedia.Abstractions;
 using SIPSorcery.SIP;
 using SIPSorcery.SIP.App;
 
@@ -60,7 +61,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             StartRegistrationAgent();
             _log($"SIP: UDP transport слушает порт {_config.LocalPort}; регистрация на {_config.Server}:{_config.Port} запущена.");
             _log(_config.AutoAnswerForRtpTest
-                ? "SIP: тестовый автоответ включён; будет использована send-only RTP-медиасессия без ALSA/PTT."
+                ? "SIP: тестовый автоответ включён; используется RTP-медиасессия с тишиной, без ALSA/PTT."
                 : "SIP: входящие INVITE обнаруживаются; автоответ RTP-тестом выключен, вызовы отклоняются с 503.");
         }
         catch
@@ -160,10 +161,13 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             serverUserAgent.Progress(SIPResponseStatusCodesEnum.Ringing, "RTP media test", null, null, null);
             _log($"SIP: отправлен 180 Ringing для вызова от {caller}; создаю тестовую RTP-медиасессию.");
 
-            // SIPSorcery's default VoIPMediaSession is a send-only test session. It allows SDP/RTP
-            // negotiation, but does not connect the CM108/ALSA devices or relay remote audio to radio.
+            // The default VoIPMediaSession has an AudioExtrasSource which can generate music.
+            // Explicitly select Silence so this diagnostic session never sends music or tones.
+            // This is still only a test media session: no ALSA device or CM108 PTT is connected.
             mediaSession = new VoIPMediaSession();
+            mediaSession.AudioExtrasSource.SetSource(AudioSourcesEnum.Silence);
             mediaSession.AcceptRtpFromAny = true;
+            _log("SIP: тестовый RTP-источник установлен в Silence; музыка и тестовые тоны отключены.");
 
             bool answered = await userAgent.Answer(serverUserAgent, mediaSession).ConfigureAwait(false);
             if (!answered)
