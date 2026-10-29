@@ -1,0 +1,24 @@
+[Unit]
+Description=Radio SIP Gateway (Linux)
+Wants=network-online.target
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+User=radiosipgateway
+Group=radiosipgateway
+SupplementaryGroups=audio
+WorkingDirectory=/opt/radiosipgateway
+ExecStart=/opt/radiosipgateway/RadioSipGateway --config /etc/radiosipgateway/config.ini
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/radiosipgateway /run/radiosipgateway
+
+[Install]
+WantedBy=multi-user.target
