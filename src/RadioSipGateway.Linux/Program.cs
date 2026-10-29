@@ -1,5 +1,6 @@
 using RadioSipGateway.Linux.Configuration;
 using RadioSipGateway.Linux.Sip;
+using RadioSipGateway.Linux.Radio;
 
 namespace RadioSipGateway.Linux;
 
@@ -9,6 +10,7 @@ internal static class Program
     {
         string configPath = "/etc/radiosipgateway/config.ini";
         bool checkOnly = false;
+        bool selfTestDtmf = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -19,6 +21,9 @@ internal static class Program
                     break;
                 case "--check-config":
                     checkOnly = true;
+                    break;
+                case "--self-test-dtmf":
+                    selfTestDtmf = true;
                     break;
                 case "--help":
                 case "-h":
@@ -33,6 +38,8 @@ internal static class Program
 
         try
         {
+            if (selfTestDtmf) return DtmfDecoderSelfTest.Run(Log);
+
             GatewayConfig config = IniConfigLoader.Load(configPath);
             ConfigValidator.Validate(config);
             Console.WriteLine($"Конфигурация прочитана: {Path.GetFullPath(configPath)}");
@@ -88,6 +95,7 @@ internal static class Program
         Console.WriteLine("RadioSipGateway Linux — консольный SIP/радиошлюз");
         Console.WriteLine("Использование:");
         Console.WriteLine("  RadioSipGateway --check-config [--config ПУТЬ]");
+        Console.WriteLine("  RadioSipGateway --self-test-dtmf");
         Console.WriteLine("  RadioSipGateway --config ПУТЬ");
     }
 }
