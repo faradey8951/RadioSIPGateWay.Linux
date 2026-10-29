@@ -70,7 +70,7 @@ internal static class Program
 
             try
             {
-                await using var sip = new SipRegistrationService(config.Sip, Log);
+                await using var sip = new SipRegistrationService(config.Sip, config.Audio, Log);
                 sip.Start();
                 try
                 {

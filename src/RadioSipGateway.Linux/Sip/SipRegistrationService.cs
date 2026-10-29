@@ -16,6 +16,7 @@ namespace RadioSipGateway.Linux.Sip;
 internal sealed class SipRegistrationService : IAsyncDisposable
 {
     private readonly SipConfig _config;
+    private readonly AudioConfig _audioConfig;
     private readonly Action<string> _log;
     private readonly Channel<byte> _retryRequests = Channel.CreateBounded<byte>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true, SingleWriter = false });
@@ -32,9 +33,10 @@ internal sealed class SipRegistrationService : IAsyncDisposable
     private volatile bool _registered;
     private volatile bool _stopping;
 
-    public SipRegistrationService(SipConfig config, Action<string> log)
+    public SipRegistrationService(SipConfig config, AudioConfig audioConfig, Action<string> log)
     {
         _config = config;
+        _audioConfig = audioConfig;
         _log = log;
     }
 
@@ -64,7 +66,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             _log($"SIP: UDP transport слушает порт {_config.LocalPort}; регистрация на {_config.Server}:{_config.Port} запущена.");
             _log(!_config.AutoAnswerForRtpTest
                 ? "SIP: входящие INVITE обнаруживаются; тестовый автоответ выключен, вызовы отклоняются с 503."
-                : _config.Audio.BridgeEnabled
+                : _audioConfig.BridgeEnabled
                     ? "SIP: тестовый автоответ включён; при вызове запускается двусторонний ALSA/RTP мост, PTT отключён."
                     : "SIP: тестовый автоответ включён; используется RTP-медиасессия с тишиной, без ALSA/PTT.");
         }
@@ -168,9 +170,9 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             mediaSession = new VoIPMediaSession();
             mediaSession.AcceptRtpFromAny = true;
             AlsaAudioBridge? audioBridge = null;
-            if (_config.Audio.BridgeEnabled)
+            if (_audioConfig.BridgeEnabled)
             {
-                audioBridge = new AlsaAudioBridge(_config.Audio, _log);
+                audioBridge = new AlsaAudioBridge(_audioConfig, _log);
                 audioBridge.Attach(mediaSession);
                 _log("SIP: включён двусторонний ALSA/RTP аудиомост. PTT/GPIO остаётся отключённым.");
             }

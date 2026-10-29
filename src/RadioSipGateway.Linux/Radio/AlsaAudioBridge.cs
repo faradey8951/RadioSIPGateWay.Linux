@@ -48,19 +48,19 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
         media.OnAudioFormatsNegotiated += formats =>
         {
             _negotiatedFormat = formats.FirstOrDefault(f => f.Codec is AudioCodecsEnum.PCMU or AudioCodecsEnum.PCMA);
-            if (_negotiatedFormat != null)
-                _log($"ALSA/RTP: согласован аудиокодек {_negotiatedFormat.Codec}, формат {_negotiatedFormat.FormatID}.");
+            if (_negotiatedFormat.HasValue)
+                _log($"ALSA/RTP: согласован аудиокодек {_negotiatedFormat.Value.Codec}, формат {_negotiatedFormat.Value.FormatID}.");
             else
                 _log("ALSA/RTP: предупреждение — не найден согласованный кодек PCMU/PCMA.");
         };
         media.OnRtpPacketReceived += (remote, mediaType, packet) =>
         {
-            if (mediaType != SDPMediaTypesEnum.Audio || _stop.IsCancellationRequested) return;
+            if (mediaType != SDPMediaTypesEnum.audio || _stop.IsCancellationRequested) return;
             try
             {
                 AudioFormat? format = _negotiatedFormat;
-                if (format == null) return;
-                short[] pcm = _decoder.DecodeAudio(packet.Payload, format);
+                if (!format.HasValue) return;
+                short[] pcm = _decoder.DecodeAudio(packet.Payload, format.Value);
                 if (pcm.Length > 0) _playbackQueue.Writer.TryWrite(pcm);
             }
             catch (Exception ex)
