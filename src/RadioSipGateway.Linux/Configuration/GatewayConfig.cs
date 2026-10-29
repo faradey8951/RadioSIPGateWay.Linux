@@ -29,6 +29,7 @@ internal sealed class AudioConfig
     public string PlaybackDevice { get; set; } = "default";
     public int SampleRate { get; set; } = 48000;
     public bool KeepDeviceOpen { get; set; } = true;
+    public bool BridgeEnabled { get; set; } = false;
 }
 
 internal sealed class TransmitConfig

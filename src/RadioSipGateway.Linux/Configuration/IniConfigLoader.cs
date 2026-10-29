@@ -45,6 +45,7 @@ internal static class IniConfigLoader
         config.Audio.PlaybackDevice = Get(values, "Audio.PlaybackDevice", config.Audio.PlaybackDevice);
         config.Audio.SampleRate = GetInt(values, "Audio.SampleRate", config.Audio.SampleRate);
         config.Audio.KeepDeviceOpen = GetBool(values, "Audio.KeepDeviceOpen", config.Audio.KeepDeviceOpen);
+        config.Audio.BridgeEnabled = GetBool(values, "Audio.BridgeEnabled", config.Audio.BridgeEnabled);
 
         config.Transmit.Mode = Get(values, "Transmit.Mode", config.Transmit.Mode).ToLowerInvariant();
         config.Transmit.VoxEnabled = GetBool(values, "Transmit.VoxEnabled", config.Transmit.VoxEnabled);

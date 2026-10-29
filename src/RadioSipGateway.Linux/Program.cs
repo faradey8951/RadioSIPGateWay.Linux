@@ -44,9 +44,9 @@ internal static class Program
             ConfigValidator.Validate(config);
             Console.WriteLine($"Конфигурация прочитана: {Path.GetFullPath(configPath)}");
             Console.WriteLine($"SIP-сервер: {config.Sip.Server}:{config.Sip.Port}");
-            Console.WriteLine($"SIP test auto-answer: {(config.Sip.AutoAnswerForRtpTest ? "ВКЛЮЧЁН (тестовая медиасессия, без ALSA/PTT)" : "выключен")}");
+            Console.WriteLine($"SIP test auto-answer: {(config.Sip.AutoAnswerForRtpTest ? "ВКЛЮЧЁН" : "выключен")}");
             Console.WriteLine($"PTT: {config.Transmit.Mode}; VOX: {(config.Transmit.VoxEnabled ? "включён" : "выключен")}");
-            Console.WriteLine($"ALSA capture: {config.Audio.CaptureDevice}; playback: {config.Audio.PlaybackDevice}");
+            Console.WriteLine($"ALSA capture: {config.Audio.CaptureDevice}; playback: {config.Audio.PlaybackDevice}; bridge: {(config.Audio.BridgeEnabled ? "ВКЛЮЧЁН" : "выключен")}");
 
             if (checkOnly)
             {
@@ -55,7 +55,9 @@ internal static class Program
             }
 
             Console.WriteLine(config.Sip.AutoAnswerForRtpTest
-                ? "ТЕСТОВЫЙ РЕЖИМ: входящие вызовы будут отвечены тестовой send-only RTP-медиасессией. ALSA-аудиомост и CM108 PTT не подключены."
+                ? config.Audio.BridgeEnabled
+                ? "ТЕСТОВЫЙ РЕЖИМ: входящие вызовы будут отвечены с двусторонним ALSA/RTP-аудиомостом. CM108 PTT не подключён; передатчик не включается."
+                : "ТЕСТОВЫЙ РЕЖИМ: входящие вызовы будут отвечены тестовой RTP-медиасессией с тишиной. ALSA-аудиомост и CM108 PTT не подключены."
                 : "РЕЖИМ SIP-регистрации: входящие вызовы отклоняются, если SIP.AutoAnswerForRtpTest=false. ALSA-аудиомост и CM108 PTT не подключены.");
             Console.WriteLine("Для остановки нажмите Ctrl+C.");
             using var stopSignal = new CancellationTokenSource();

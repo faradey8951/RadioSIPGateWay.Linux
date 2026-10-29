@@ -1,6 +1,7 @@
 using System.Net;
 using System.Threading.Channels;
 using RadioSipGateway.Linux.Configuration;
+using RadioSipGateway.Linux.Radio;
 using SIPSorcery.Media;
 using SIPSorceryMedia.Abstractions;
 using SIPSorcery.SIP;
@@ -23,6 +24,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
     private SIPRegistrationUserAgent? _registrationAgent;
     private SIPUserAgent? _callUserAgent;
     private VoIPMediaSession? _activeTestMedia;
+    private AlsaAudioBridge? _activeAudioBridge;
     private Task? _retryWorker;
     private int _retryAttempt;
     private int _retryQueued;
@@ -60,9 +62,11 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             _retryWorker = Task.Run(RetryWorkerAsync);
             StartRegistrationAgent();
             _log($"SIP: UDP transport слушает порт {_config.LocalPort}; регистрация на {_config.Server}:{_config.Port} запущена.");
-            _log(_config.AutoAnswerForRtpTest
-                ? "SIP: тестовый автоответ включён; используется RTP-медиасессия с тишиной, без ALSA/PTT."
-                : "SIP: входящие INVITE обнаруживаются; автоответ RTP-тестом выключен, вызовы отклоняются с 503.");
+            _log(!_config.AutoAnswerForRtpTest
+                ? "SIP: входящие INVITE обнаруживаются; тестовый автоответ выключен, вызовы отклоняются с 503."
+                : _config.Audio.BridgeEnabled
+                    ? "SIP: тестовый автоответ включён; при вызове запускается двусторонний ALSA/RTP мост, PTT отключён."
+                    : "SIP: тестовый автоответ включён; используется RTP-медиасессия с тишиной, без ALSA/PTT.");
         }
         catch
         {
@@ -153,7 +157,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             if (!_config.AutoAnswerForRtpTest)
             {
                 serverUserAgent.Reject(SIPResponseStatusCodesEnum.ServiceUnavailable,
-                    "RTP test auto-answer disabled; ALSA bridge not implemented");
+                    "RTP test auto-answer disabled");
                 _log($"SIP: входящий вызов от {caller} на {targetForLog} отклонён с 503: SIP.AutoAnswerForRtpTest=false.");
                 return;
             }
@@ -161,13 +165,21 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             serverUserAgent.Progress(SIPResponseStatusCodesEnum.Ringing, "RTP media test", null, null, null);
             _log($"SIP: отправлен 180 Ringing для вызова от {caller}; создаю тестовую RTP-медиасессию.");
 
-            // The default VoIPMediaSession has an AudioExtrasSource which can generate music.
-            // Explicitly select Silence so this diagnostic session never sends music or tones.
-            // This is still only a test media session: no ALSA device or CM108 PTT is connected.
             mediaSession = new VoIPMediaSession();
-            mediaSession.AudioExtrasSource.SetSource(AudioSourcesEnum.Silence);
             mediaSession.AcceptRtpFromAny = true;
-            _log("SIP: тестовый RTP-источник установлен в Silence; музыка и тестовые тоны отключены.");
+            AlsaAudioBridge? audioBridge = null;
+            if (_config.Audio.BridgeEnabled)
+            {
+                audioBridge = new AlsaAudioBridge(_config.Audio, _log);
+                audioBridge.Attach(mediaSession);
+                _log("SIP: включён двусторонний ALSA/RTP аудиомост. PTT/GPIO остаётся отключённым.");
+            }
+            else
+            {
+                // Explicitly select Silence so this diagnostic session never sends music or tones.
+                mediaSession.AudioExtrasSource.SetSource(AudioSourcesEnum.Silence);
+                _log("SIP: тестовый RTP-источник установлен в Silence; музыка и тестовые тоны отключены.");
+            }
 
             bool answered = await userAgent.Answer(serverUserAgent, mediaSession).ConfigureAwait(false);
             if (!answered)
@@ -175,13 +187,23 @@ internal sealed class SipRegistrationService : IAsyncDisposable
                 mediaSession.Close("RTP test answer failed");
                 mediaSession.Dispose();
                 mediaSession = null;
+                if (audioBridge != null) await audioBridge.DisposeAsync().ConfigureAwait(false);
                 Interlocked.Exchange(ref _callInProgress, 0);
                 _log($"SIP: не удалось ответить на вызов от {caller}; SIPSorcery не смог согласовать тестовую медиасессию.");
                 return;
             }
 
             _activeTestMedia = mediaSession;
-            _log($"SIP: тестовый вызов от {caller} на {targetForLog} принят; SIP/SDP/RTP сессия поднята. ВНИМАНИЕ: это не двусторонний ALSA-аудиомост, PTT не задействован.");
+            if (audioBridge != null)
+            {
+                _activeAudioBridge = audioBridge;
+                await audioBridge.StartAsync().ConfigureAwait(false);
+                _log($"SIP: вызов от {caller} принят; двусторонний ALSA/RTP аудиомост запущен. PTT не задействован.");
+            }
+            else
+            {
+                _log($"SIP: тестовый вызов от {caller} на {targetForLog} принят; SIP/SDP/RTP сессия с тишиной поднята. ALSA/PTT не задействованы.");
+            }
         }
         catch (Exception ex)
         {
@@ -190,6 +212,8 @@ internal sealed class SipRegistrationService : IAsyncDisposable
                 try { mediaSession.Close("Incoming test call failed"); } catch { }
                 try { mediaSession.Dispose(); } catch { }
             }
+            var failedBridge = Interlocked.Exchange(ref _activeAudioBridge, null);
+            if (failedBridge != null) _ = failedBridge.DisposeAsync();
             if (serverUserAgent != null)
             {
                 try { serverUserAgent.Reject(SIPResponseStatusCodesEnum.ServiceUnavailable, "RTP test setup failed"); } catch { }
@@ -208,6 +232,8 @@ internal sealed class SipRegistrationService : IAsyncDisposable
 
     private void HandleCallHungup(string callId)
     {
+        var bridge = Interlocked.Exchange(ref _activeAudioBridge, null);
+        if (bridge != null) _ = bridge.DisposeAsync();
         var media = Interlocked.Exchange(ref _activeTestMedia, null);
         if (media != null)
         {
@@ -261,6 +287,11 @@ internal sealed class SipRegistrationService : IAsyncDisposable
         _retryRequests.Writer.TryComplete();
 
         try { _callUserAgent?.Hangup(); } catch { }
+        var bridge = Interlocked.Exchange(ref _activeAudioBridge, null);
+        if (bridge != null)
+        {
+            try { await bridge.DisposeAsync().ConfigureAwait(false); } catch { }
+        }
         var media = Interlocked.Exchange(ref _activeTestMedia, null);
         if (media != null)
         {
