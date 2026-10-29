@@ -21,7 +21,7 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
 
     private readonly AudioConfig _config;
     private readonly Action<string> _log;
-    private readonly AudioEncoder _decoder = new();
+    private readonly AudioEncoder _encoder = new();
     private readonly Channel<short[]> _playbackQueue = Channel.CreateBounded<short[]>(
         new BoundedChannelOptions(25) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true, SingleWriter = false });
     private readonly CancellationTokenSource _stop = new();
@@ -49,7 +49,13 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
         {
             _negotiatedFormat = formats.FirstOrDefault(f => f.Codec is AudioCodecsEnum.PCMU or AudioCodecsEnum.PCMA);
             if (_negotiatedFormat.HasValue)
+            {
+                // Keep AudioExtrasSource aligned with the negotiated RTP track format.
+                // The Linux capture path encodes PCM directly below; ExternalAudioSourceRawSample
+                // is not implemented by AudioExtrasSource in the SIPSorcery version used here.
+                media.AudioExtrasSource.SetAudioSourceFormat(_negotiatedFormat.Value);
                 _log($"ALSA/RTP: согласован аудиокодек {_negotiatedFormat.Value.Codec}, формат {_negotiatedFormat.Value.FormatID}.");
+            }
             else
                 _log("ALSA/RTP: предупреждение — не найден согласованный кодек PCMU/PCMA.");
         };
@@ -60,7 +66,7 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
             {
                 AudioFormat? format = _negotiatedFormat;
                 if (!format.HasValue) return;
-                short[] pcm = _decoder.DecodeAudio(packet.Payload, format.Value);
+                short[] pcm = _encoder.DecodeAudio(packet.Payload, format.Value);
                 if (pcm.Length > 0) _playbackQueue.Writer.TryWrite(pcm);
             }
             catch (Exception ex)
@@ -130,14 +136,27 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
                 for (int i = 0; i < samples.Length; i++)
                     samples[i] = BinaryPrimitives.ReadInt16LittleEndian(bytes.AsSpan(i * 2, 2));
 
-                _media?.AudioExtrasSource.ExternalAudioSourceRawSample(
-                    AudioSamplingRatesEnum.Rate8KHz, 20, samples);
+                AudioFormat? format = _negotiatedFormat;
+                VoIPMediaSession? media = _media;
+                if (!format.HasValue || media == null)
+                    continue;
+
+                // Encode the 20 ms PCM frame using the negotiated G.711 codec, then send it
+                // directly through the RTP session. AudioExtrasSource.ExternalAudioSourceRawSample
+                // throws NotImplementedException in the SIPSorcery build used by this project.
+                byte[] encoded = _encoder.EncodeAudio(samples, format.Value);
+                if (encoded.Length > 0)
+                {
+                    // For PCMA/PCMU at 8 kHz, one encoded octet advances the RTP timestamp by one.
+                    media.SendAudio((uint)encoded.Length, encoded);
+                }
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            if (!_stop.IsCancellationRequested) _log($"ALSA: ошибка захвата звука (arecord): {ex.Message}");
+            if (!_stop.IsCancellationRequested)
+                _log($"ALSA/RTP: ошибка в цикле захвата/кодирования/передачи аудио: {ex.GetType().Name}: {ex.Message}");
         }
     }
 

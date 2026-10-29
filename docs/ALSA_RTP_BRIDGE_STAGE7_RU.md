@@ -71,3 +71,8 @@ dotnet run --project src/RadioSipGateway.Linux --configuration Release --no-buil
 - Аудио берётся/проигрывается через внешние процессы `arecord`/`aplay`.
 - Нет PTT, VOX, TOT, DTMF-маршрутизации, сигналов courtesy/ringback и радио-сценариев.
 - Пока это тестовый ALSA/RTP-мост, а не полноценный перенос Windows-шлюза.
+
+
+### Исправление Fix 2: отправка PCM в RTP
+
+В первоначальном варианте вызов `AudioExtrasSource.ExternalAudioSourceRawSample` приводил к `NotImplementedException` в используемой версии SIPSorcery. Теперь захваченные 20-мс PCM-кадры напрямую кодируются в согласованный PCMA/PCMU через `AudioEncoder` и передаются в RTP-сессию методом `SendAudio`. Это исправление ещё необходимо собрать и проверить на целевом Debian; PTT остаётся отключённым.
