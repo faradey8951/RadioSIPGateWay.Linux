@@ -8,6 +8,7 @@ internal static class ConfigValidator
         Port(c.Sip.Port, "SIP.Port");
         Port(c.Sip.LocalPort, "SIP.LocalPort");
         if (c.Sip.RegistrationRetrySeconds < 1 || c.Sip.RegistrationRetrySeconds > 3600) throw new InvalidOperationException("SIP.RegistrationRetrySeconds должен быть в диапазоне 1..3600.");
+        if (c.Sip.RegistrationExpirySeconds < 30 || c.Sip.RegistrationExpirySeconds > 3600) throw new InvalidOperationException("SIP.RegistrationExpirySeconds должен быть в диапазоне 30..3600.");
         if (c.Audio.SampleRate is not (8000 or 16000 or 32000 or 44100 or 48000)) throw new InvalidOperationException("Audio.SampleRate: допустимы 8000, 16000, 32000, 44100 или 48000.");
         if (c.Transmit.Mode is not ("cm108" or "vox" or "none")) throw new InvalidOperationException("Transmit.Mode должен быть cm108, vox или none.");
         if (c.Transmit.PttReleaseDelayMs < 0 || c.Transmit.PttReleaseDelayMs > 5000) throw new InvalidOperationException("Transmit.PttReleaseDelayMs должен быть в диапазоне 0..5000.");

@@ -18,6 +18,7 @@ internal sealed class SipConfig
     public string Password { get; set; } = "";
     public int LocalPort { get; set; } = 5062;
     public int RegistrationRetrySeconds { get; set; } = 10;
+    public int RegistrationExpirySeconds { get; set; } = 120;
 }
 
 internal sealed class AudioConfig

@@ -7,8 +7,8 @@ using SIPSorcery.SIP.App;
 namespace RadioSipGateway.Linux.Sip;
 
 /// <summary>
-/// SIP REGISTER lifecycle for the Linux port. This first milestone intentionally
-/// handles registration only; call signaling and media are added in later stages.
+/// SIP registration lifecycle plus a safe incoming-INVITE probe.
+/// Until RTP/media is implemented, incoming calls are explicitly rejected rather than left hanging.
 /// </summary>
 internal sealed class SipRegistrationService : IAsyncDisposable
 {
@@ -19,6 +19,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private SIPTransport? _transport;
     private SIPRegistrationUserAgent? _registrationAgent;
+    private SIPUserAgent? _callUserAgent;
     private Task? _retryWorker;
     private int _retryAttempt;
     private int _retryQueued;
@@ -46,9 +47,16 @@ internal sealed class SipRegistrationService : IAsyncDisposable
         {
             transport.AddSIPChannel(new SIPUDPChannel(new IPEndPoint(IPAddress.Any, _config.LocalPort)));
             _transport = transport;
+
+            // Share the transport with a SIPUserAgent so INVITE requests can be observed.
+            // Media is not implemented in this milestone, so incoming calls are rejected safely.
+            _callUserAgent = new SIPUserAgent(transport, null, true);
+            _callUserAgent.OnIncomingCall += HandleIncomingCallAsync;
+
             _retryWorker = Task.Run(RetryWorkerAsync);
             StartRegistrationAgent();
             _log($"SIP: UDP transport слушает порт {_config.LocalPort}; регистрация на {_config.Server}:{_config.Port} запущена.");
+            _log("SIP: обработчик входящих INVITE активен; до реализации RTP такие вызовы будут отклоняться с 503.");
         }
         catch
         {
@@ -63,7 +71,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
         if (_stopping || _transport == null) return;
 
         string registrar = $"{_config.Server.Trim()}:{_config.Port}";
-        var agent = new SIPRegistrationUserAgent(_transport, _config.Username, _config.Password, registrar, 120);
+        var agent = new SIPRegistrationUserAgent(_transport, _config.Username, _config.Password, registrar, _config.RegistrationExpirySeconds);
         _registrationAgent = agent;
 
         agent.RegistrationSuccessful += (uri, response) =>
@@ -72,7 +80,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             _registered = true;
             _retryAttempt = 0;
             Interlocked.Exchange(ref _retryQueued, 0);
-            _log($"SIP: регистрация успешна: {uri}.");
+            _log($"SIP: регистрация успешна: {uri}; срок регистрации запрошен {_config.RegistrationExpirySeconds} с.");
         };
 
         agent.RegistrationFailed += (uri, response, error) =>
@@ -82,14 +90,23 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             string detail = response == null
                 ? error
                 : $"{response.StatusCode} {response.ReasonPhrase}" + (string.IsNullOrWhiteSpace(error) ? "" : $" — {error}");
-            _log($"SIP: ошибка регистрации: {detail}");
+            if (response?.Status == SIPResponseStatusCodesEnum.Unauthorised ||
+                response?.Status == SIPResponseStatusCodesEnum.ProxyAuthenticationRequired)
+            {
+                _log($"SIP: сервер отклонил аутентификацию ({detail}). Проверьте SIP.Username, SIP.Password и настройки учётной записи в Yate.");
+            }
+            else
+            {
+                _log($"SIP: ошибка регистрации: {detail}");
+            }
             QueueRetry();
         };
 
         agent.RegistrationTemporaryFailure += (uri, response, message) =>
         {
             if (!ReferenceEquals(_registrationAgent, agent) || _stopping) return;
-            _log($"SIP: временная ошибка регистрации: {message}");
+            string status = response == null ? string.Empty : $" ({response.StatusCode} {response.ReasonPhrase})";
+            _log($"SIP: временная ошибка регистрации{status}: {message}. Агент регистрации продолжит обработку; при окончательном отказе будет запущен повтор.");
         };
 
         agent.RegistrationRemoved += (uri, response) =>
@@ -101,6 +118,37 @@ internal sealed class SipRegistrationService : IAsyncDisposable
         };
 
         agent.Start();
+    }
+
+    private Task HandleIncomingCallAsync(SIPUserAgent userAgent, SIPRequest request)
+    {
+        if (request == null || _stopping || _transport == null)
+            return Task.CompletedTask;
+
+        string caller = "неизвестный абонент";
+        string target = "неизвестный адрес";
+        try
+        {
+            string? fromUser = request.Header?.From?.FromURI?.User;
+            if (!string.IsNullOrWhiteSpace(fromUser)) caller = fromUser;
+            string? toUser = request.Header?.To?.ToURI?.User;
+            if (!string.IsNullOrWhiteSpace(toUser)) target = toUser;
+        }
+        catch { /* Log the request even if a header is incomplete. */ }
+
+        try
+        {
+            SIPServerUserAgent serverUserAgent = userAgent.AcceptCall(request);
+            serverUserAgent.Reject(SIPResponseStatusCodesEnum.ServiceUnavailable,
+                "Radio gateway media path is not ready");
+            _log($"SIP: входящий INVITE от {caller} на {target}; отклонён ответом 503 Service Unavailable (RTP/аудио ещё не реализованы).");
+        }
+        catch (Exception ex)
+        {
+            _log($"SIP: ошибка обработки входящего INVITE от {caller}: {ex.Message}");
+        }
+
+        return Task.CompletedTask;
     }
 
     private void QueueRetry()
@@ -121,7 +169,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
                 _retryAttempt++;
                 int multiplier = _retryAttempt switch { 1 => 1, 2 => 2, 3 => 3, _ => 3 };
                 int delay = Math.Clamp(_config.RegistrationRetrySeconds * multiplier, 1, 60);
-                _log($"SIP: повторная регистрация через {delay} с (попытка {_retryAttempt}).");
+                _log($"SIP: повторная регистрация через {delay} с (попытка {_retryAttempt}; базовый интервал {_config.RegistrationRetrySeconds} с).");
                 await Task.Delay(TimeSpan.FromSeconds(delay), _stop.Token).ConfigureAwait(false);
 
                 if (_stopping || _registered) { Interlocked.Exchange(ref _retryQueued, 0); continue; }
@@ -147,6 +195,9 @@ internal sealed class SipRegistrationService : IAsyncDisposable
         _registered = false;
         _stop.Cancel();
         _retryRequests.Writer.TryComplete();
+
+        try { _callUserAgent = null; }
+        catch (Exception ex) { _log($"SIP: предупреждение при остановке обработчика вызовов: {ex.Message}"); }
 
         try { _registrationAgent?.Stop(); }
         catch (Exception ex) { _log($"SIP: предупреждение при снятии регистрации: {ex.Message}"); }

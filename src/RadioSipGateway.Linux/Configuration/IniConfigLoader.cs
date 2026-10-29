@@ -38,6 +38,7 @@ internal static class IniConfigLoader
         config.Sip.Password = Get(values, "SIP.Password", config.Sip.Password);
         config.Sip.LocalPort = GetInt(values, "SIP.LocalPort", config.Sip.LocalPort);
         config.Sip.RegistrationRetrySeconds = GetInt(values, "SIP.RegistrationRetrySeconds", config.Sip.RegistrationRetrySeconds);
+        config.Sip.RegistrationExpirySeconds = GetInt(values, "SIP.RegistrationExpirySeconds", config.Sip.RegistrationExpirySeconds);
 
         config.Audio.CaptureDevice = Get(values, "Audio.CaptureDevice", config.Audio.CaptureDevice);
         config.Audio.PlaybackDevice = Get(values, "Audio.PlaybackDevice", config.Audio.PlaybackDevice);
