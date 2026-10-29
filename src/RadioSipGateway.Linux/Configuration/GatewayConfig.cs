@@ -19,6 +19,8 @@ internal sealed class SipConfig
     public int LocalPort { get; set; } = 5062;
     public int RegistrationRetrySeconds { get; set; } = 10;
     public int RegistrationExpirySeconds { get; set; } = 120;
+    /// <summary>TEST ONLY: answer incoming calls using SIPSorcery send-only test media, without ALSA or PTT.</summary>
+    public bool AutoAnswerForRtpTest { get; set; } = false;
 }
 
 internal sealed class AudioConfig

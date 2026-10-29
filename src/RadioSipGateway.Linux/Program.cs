@@ -44,6 +44,7 @@ internal static class Program
             ConfigValidator.Validate(config);
             Console.WriteLine($"Конфигурация прочитана: {Path.GetFullPath(configPath)}");
             Console.WriteLine($"SIP-сервер: {config.Sip.Server}:{config.Sip.Port}");
+            Console.WriteLine($"SIP test auto-answer: {(config.Sip.AutoAnswerForRtpTest ? "ВКЛЮЧЁН (тестовая медиасессия, без ALSA/PTT)" : "выключен")}");
             Console.WriteLine($"PTT: {config.Transmit.Mode}; VOX: {(config.Transmit.VoxEnabled ? "включён" : "выключен")}");
             Console.WriteLine($"ALSA capture: {config.Audio.CaptureDevice}; playback: {config.Audio.PlaybackDevice}");
 
@@ -53,7 +54,9 @@ internal static class Program
                 return 0;
             }
 
-            Console.WriteLine("РЕЖИМ ПЕРВОГО ЭТАПА: SIP-регистрация. Звонки, RTP-аудио, ALSA и CM108 PTT пока не подключены.");
+            Console.WriteLine(config.Sip.AutoAnswerForRtpTest
+                ? "ТЕСТОВЫЙ РЕЖИМ: входящие вызовы будут отвечены тестовой send-only RTP-медиасессией. ALSA-аудиомост и CM108 PTT не подключены."
+                : "РЕЖИМ SIP-регистрации: входящие вызовы отклоняются, если SIP.AutoAnswerForRtpTest=false. ALSA-аудиомост и CM108 PTT не подключены.");
             Console.WriteLine("Для остановки нажмите Ctrl+C.");
             using var stopSignal = new CancellationTokenSource();
             ConsoleCancelEventHandler cancelHandler = (_, e) =>
