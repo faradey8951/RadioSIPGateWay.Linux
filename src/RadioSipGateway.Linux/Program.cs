@@ -1,11 +1,11 @@
 using RadioSipGateway.Linux.Configuration;
-using RadioSipGateway.Linux.Diagnostics;
+using RadioSipGateway.Linux.Sip;
 
 namespace RadioSipGateway.Linux;
 
 internal static class Program
 {
-    private static int Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
         string configPath = "/etc/radiosipgateway/config.ini";
         bool checkOnly = false;
@@ -46,10 +46,33 @@ internal static class Program
                 return 0;
             }
 
-            Console.Error.WriteLine("Linux-порт пока находится в стадии переноса: SIP-регистрация, ALSA-аудиотракт и CM108 PTT ещё не подключены.");
-            Console.Error.WriteLine("Чтобы не создавать ложное впечатление работающего шлюза, запуск передачи на этом этапе заблокирован.");
-            Console.Error.WriteLine("Сейчас доступен только --check-config. См. docs/PORTING_STATUS_RU.md.");
-            return 3;
+            Console.WriteLine("РЕЖИМ ПЕРВОГО ЭТАПА: SIP-регистрация. Звонки, RTP-аудио, ALSA и CM108 PTT пока не подключены.");
+            Console.WriteLine("Для остановки нажмите Ctrl+C.");
+            using var stopSignal = new CancellationTokenSource();
+            ConsoleCancelEventHandler cancelHandler = (_, e) =>
+            {
+                e.Cancel = true;
+                stopSignal.Cancel();
+            };
+            Console.CancelKeyPress += cancelHandler;
+
+            try
+            {
+                await using var sip = new SipRegistrationService(config.Sip, Log);
+                sip.Start();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, stopSignal.Token);
+                }
+                catch (OperationCanceledException) when (stopSignal.IsCancellationRequested) { }
+            }
+            finally
+            {
+                Console.CancelKeyPress -= cancelHandler;
+            }
+
+            Console.WriteLine("Завершение работы.");
+            return 0;
         }
         catch (Exception ex)
         {
@@ -57,6 +80,8 @@ internal static class Program
             return 1;
         }
     }
+
+    private static void Log(string message) => Console.WriteLine($"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}] {message}");
 
     private static void PrintHelp()
     {
