@@ -69,6 +69,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
                     _transmitConfig.HidrawPath,
                     cosEnabled: true,
                     cosActiveHigh: _transmitConfig.CosActiveHigh,
+                    pttActiveHigh: _transmitConfig.PttActiveLevel == "high",
                     releaseDelayMs: _transmitConfig.VoxEnabled
                         ? Math.Max(_transmitConfig.PttReleaseDelayMs, _voxConfig.ReleaseDelayMs)
                         : _transmitConfig.PttReleaseDelayMs,
@@ -76,7 +77,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
                     totLockoutSeconds: _radioConfig.SipToRadioTotLockoutSeconds,
                     _log);
                 _pttController.Start();
-                _log("SIP: CM108 PTT/COS-контроллер готов; GPIO3 HIGH = передача, LOW = приём.");
+                _log($"SIP: CM108 PTT/COS-контроллер готов; активный уровень GPIO3 = {_transmitConfig.PttActiveLevel.ToUpperInvariant()}.");
             }
 
             // SIPSorcery's incoming-call event is Action-based; async work is launched explicitly.
@@ -318,6 +319,13 @@ internal sealed class SipRegistrationService : IAsyncDisposable
         }
     }
 
+    /// <summary>Immediately drops CM108 PTT from console/POSIX shutdown signal handlers.</summary>
+    public void EmergencyReleasePtt(string reason)
+    {
+        try { _pttController?.EmergencyRelease(reason); }
+        catch (Exception ex) { _log($"PTT: аварийное освобождение не удалось: {ex.Message}"); }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_stopping) return;
@@ -325,6 +333,16 @@ internal sealed class SipRegistrationService : IAsyncDisposable
         _registered = false;
         _stop.Cancel();
         _retryRequests.Writer.TryComplete();
+
+        // Drop PTT before Hangup/ALSA/SIP cleanup, which may take longer or race
+        // with the call-hangup callback.
+        EmergencyReleasePtt("остановка приложения");
+        if (_pttController != null)
+        {
+            try { await _pttController.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _log($"PTT: ошибка аварийного закрытия CM108: {ex.Message}"); }
+            _pttController = null;
+        }
 
         try { _callUserAgent?.Hangup(); } catch { }
         var bridge = Interlocked.Exchange(ref _activeAudioBridge, null);
@@ -337,12 +355,6 @@ internal sealed class SipRegistrationService : IAsyncDisposable
         {
             try { media.Close("Service stopping"); } catch { }
             try { media.Dispose(); } catch { }
-        }
-        if (_pttController != null)
-        {
-            try { await _pttController.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception ex) { _log($"PTT: ошибка остановки CM108-контроллера: {ex.Message}"); }
-            _pttController = null;
         }
         try { _callUserAgent?.Dispose(); } catch (Exception ex) { _log($"SIP: предупреждение при остановке SIPUserAgent: {ex.Message}"); }
         _callUserAgent = null;

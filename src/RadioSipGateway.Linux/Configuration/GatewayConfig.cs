@@ -39,6 +39,8 @@ internal sealed class TransmitConfig
     public string HidrawPath { get; set; } = "";
     /// <summary>Explicit opt-in: key CM108 GPIO3 while remote SIP audio is active.</summary>
     public bool PttEnabled { get; set; } = false;
+    /// <summary>Electrical level that keys the radio: "high" or "low". The measured CM108 test board uses HIGH.</summary>
+    public string PttActiveLevel { get; set; } = "high";
     public string PttPin { get; set; } = "gpio3";
     public string CosSource { get; set; } = "voldn";
     /// <summary>When true, VOLDN bit set means radio channel busy.</summary>

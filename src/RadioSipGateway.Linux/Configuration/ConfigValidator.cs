@@ -14,9 +14,12 @@ internal static class ConfigValidator
         if (c.Transmit.PttReleaseDelayMs < 0 || c.Transmit.PttReleaseDelayMs > 5000) throw new InvalidOperationException("Transmit.PttReleaseDelayMs должен быть в диапазоне 0..5000.");
         if (c.Transmit.PttEnabled && c.Transmit.Mode != "cm108") throw new InvalidOperationException("Transmit.PttEnabled=true поддерживается только при Transmit.Mode=cm108.");
         if (c.Transmit.PttEnabled && string.IsNullOrWhiteSpace(c.Transmit.HidrawPath)) throw new InvalidOperationException("Для Transmit.PttEnabled=true необходимо задать Transmit.HidrawPath, например /dev/hidraw0.");
+        if (c.Transmit.PttActiveLevel is not ("high" or "low")) throw new InvalidOperationException("Transmit.PttActiveLevel должен быть High или Low.");
         if (c.Transmit.PttPin != "gpio3") throw new InvalidOperationException("На данном этапе поддерживается только Transmit.PttPin=gpio3.");
         if (c.Transmit.CosSource != "voldn") throw new InvalidOperationException("На данном этапе поддерживается только Transmit.CosSource=voldn.");
         if (c.Transmit.PttEnabled && (!c.Audio.BridgeEnabled || !c.Sip.AutoAnswerForRtpTest)) throw new InvalidOperationException("Для тестового PTT включите SIP.AutoAnswerForRtpTest=true и Audio.BridgeEnabled=true.");
+        if (c.Transmit.PttEnabled && !c.Transmit.VoxEnabled)
+            Console.WriteLine("ПРЕДУПРЕЖДЕНИЕ: VoxEnabled=false — любой входящий RTP-кадр, включая цифровую тишину, удерживает запрос PTT. Для передачи только во время речи включите Transmit.VoxEnabled=true.");
         if (c.Vox.ThresholdDbfs < -120 || c.Vox.ThresholdDbfs > -1) throw new InvalidOperationException("VOX.ThresholdDbfs должен быть в диапазоне -120..-1 dBFS.");
         if (c.Vox.ActivationDelayMs < 0 || c.Vox.ActivationDelayMs > 5000) throw new InvalidOperationException("VOX.ActivationDelayMs должен быть в диапазоне 0..5000.");
         if (c.Vox.ReleaseDelayMs < 50 || c.Vox.ReleaseDelayMs > 10000) throw new InvalidOperationException("VOX.ReleaseDelayMs должен быть в диапазоне 50..10000.");

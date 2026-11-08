@@ -27,6 +27,7 @@ internal sealed class Cm108PttController : IAsyncDisposable
     private readonly string _path;
     private readonly bool _cosEnabled;
     private readonly bool _cosActiveHigh;
+    private readonly bool _pttActiveHigh;
     private readonly int _releaseDelayMs;
     private readonly int _totSeconds;
     private readonly int _totLockoutSeconds;
@@ -40,6 +41,7 @@ internal sealed class Cm108PttController : IAsyncDisposable
     private bool _faulted;
     private bool _cosKnown;
     private bool _cosBusy;
+    // Logical PTT request/state, not the physical GPIO voltage.
     private bool _pttRequested;
     private bool _pttOn;
     private bool _totLatched;
@@ -52,6 +54,7 @@ internal sealed class Cm108PttController : IAsyncDisposable
         string path,
         bool cosEnabled,
         bool cosActiveHigh,
+        bool pttActiveHigh,
         int releaseDelayMs,
         int totSeconds,
         int totLockoutSeconds,
@@ -60,6 +63,7 @@ internal sealed class Cm108PttController : IAsyncDisposable
         _path = path;
         _cosEnabled = cosEnabled;
         _cosActiveHigh = cosActiveHigh;
+        _pttActiveHigh = pttActiveHigh;
         _releaseDelayMs = releaseDelayMs;
         _totSeconds = totSeconds;
         _totLockoutSeconds = totLockoutSeconds;
@@ -80,12 +84,21 @@ internal sealed class Cm108PttController : IAsyncDisposable
             _fd = fd;
             try
             {
-                // Fail-safe at startup: GPIO3 becomes an output and is driven LOW.
-                WritePttLocked(false);
+                // Always drive the configured inactive level before starting any reader/timer.
+                // Repeat the report to avoid relying on a single USB HID write at startup.
+                for (int i = 0; i < 3; i++)
+                {
+                    WritePttOutputLevelLocked(outputHigh: !_pttActiveHigh);
+                    if (i < 2) Thread.Sleep(20);
+                }
+                _pttOn = false;
                 _started = true;
             }
             catch
             {
+                // The first safe write may have failed partially. Make one more best-effort
+                // attempt before closing the HID handle.
+                TryWriteIdleLocked("ошибка инициализации CM108");
                 Native.close(_fd);
                 _fd = -1;
                 throw;
@@ -94,11 +107,13 @@ internal sealed class Cm108PttController : IAsyncDisposable
 
         _readTask = Task.Run(ReadLoop);
         _monitorTask = Task.Run(MonitorLoopAsync);
-        _log($"CM108: {_path} открыт; GPIO3 настроен как выход LOW. PTT активен уровнем HIGH.");
+        string active = _pttActiveHigh ? "HIGH" : "LOW";
+        string idle = _pttActiveHigh ? "LOW" : "HIGH";
+        _log($"CM108: {_path} открыт; GPIO3 настроен как выход. Активный уровень PTT={active}; безопасный уровень={idle}.");
         if (_cosEnabled)
-            _log("COS: источник VOLDN; передача заблокирована до первого HID-отчёта с известным состоянием COS.");
+            _log($"COS: источник VOLDN; уровень {( _cosActiveHigh ? "HIGH" : "LOW" )} означает ЗАНЯТО. До первого HID-отчёта передача заблокирована.");
         else
-            _log("COS: контроль отключён; передача не будет блокироваться по занятости радиоканала.");
+            _log("COS: контроль отключён; передача не блокируется по занятости радиоканала.");
     }
 
     /// <summary>Called for every decoded remote SIP audio frame considered active.</summary>
@@ -120,10 +135,28 @@ internal sealed class Cm108PttController : IAsyncDisposable
         {
             if (!_started || _disposed) return;
             _pttRequested = false;
-            _totLatched = false;
             _pttStartedAt = null;
+            _totLatched = false;
             _blockedMessageShown = false;
             SetPttLocked(false, reason);
+        }
+    }
+
+    /// <summary>
+    /// Synchronous best-effort release used directly from Ctrl+C/SIGTERM handlers,
+    /// before asynchronous SIP/ALSA teardown starts.
+    /// </summary>
+    public void EmergencyRelease(string reason)
+    {
+        lock (_gate)
+        {
+            if (_fd < 0 || _disposed) return;
+            _pttRequested = false;
+            _pttStartedAt = null;
+            _totLatched = false;
+            _blockedMessageShown = false;
+            TryWriteIdleLocked(reason);
+            _pttOn = false;
         }
     }
 
@@ -181,7 +214,9 @@ internal sealed class Cm108PttController : IAsyncDisposable
                 {
                     _faulted = true;
                     _pttRequested = false;
-                    SetPttLocked(false, "потеря HID/COS-соединения");
+                    _pttStartedAt = null;
+                    TryWriteIdleLocked("потеря HID/COS-соединения");
+                    _pttOn = false;
                     _log("CM108: обработчик HID остановлен; дальнейшая передача запрещена до перезапуска приложения.");
                 }
             }
@@ -191,7 +226,8 @@ internal sealed class Cm108PttController : IAsyncDisposable
     private void ProcessInputReport(byte[] data, int length)
     {
         if (!_cosEnabled || length < 1) return;
-        bool voldnBitSet = (data[0] & VoldnMask) != 0;
+        byte raw = data[0];
+        bool voldnBitSet = (raw & VoldnMask) != 0;
         bool busy = _cosActiveHigh ? voldnBitSet : !voldnBitSet;
         lock (_gate)
         {
@@ -200,10 +236,14 @@ internal sealed class Cm108PttController : IAsyncDisposable
             _cosKnown = true;
             _cosBusy = busy;
             if (changed)
-                _log(busy ? "COS: VOLDN активен — радиоканал ЗАНЯТ; PTT запрещён." : "COS: VOLDN неактивен — радиоканал СВОБОДЕН.");
+                _log($"COS: VOLDN raw=0x{raw:X2}, активная полярность={(_cosActiveHigh ? "HIGH" : "LOW")} — {(busy ? "радиоканал ЗАНЯТ; PTT запрещён" : "радиоканал СВОБОДЕН")}.");
             if (busy)
             {
-                if (_pttOn) SetPttLocked(false, "COS стал активным");
+                // COS is an interlock for starting a transmission. Do not drop an
+                // already-keyed half-duplex transmitter when its own RF causes COS
+                // to assert; after PTT is released, the busy state blocks re-keying.
+                if (_pttOn)
+                    _log("COS: канал стал занятым во время собственной передачи; текущий PTT сохраняется до окончания аудио, повторное включение после отпускания будет заблокировано.");
                 _blockedMessageShown = false;
             }
             else
@@ -228,7 +268,6 @@ internal sealed class Cm108PttController : IAsyncDisposable
                     if (_pttRequested && _releaseDelayMs >= 0 && now - _lastAudioAt >= TimeSpan.FromMilliseconds(_releaseDelayMs))
                     {
                         _pttRequested = false;
-                        _pttStartedAt = null;
                         SetPttLocked(false, "нет входящих SIP-аудиокадров");
                     }
 
@@ -237,7 +276,7 @@ internal sealed class Cm108PttController : IAsyncDisposable
                         SetPttLocked(false, "сработал SIP→радио TOT");
                         _totLatched = true;
                         _lockoutUntil = now.AddSeconds(_totLockoutSeconds);
-                        _log($"PTT: превышен TOT ({_totSeconds} с); передача заблокирована до завершения текущей активности/вызова. Блокировка после TOT: {_totLockoutSeconds} с.");
+                        _log($"PTT: превышен TOT ({_totSeconds} с); передача заблокирована до окончания текущего вызова. Блокировка после TOT: {_totLockoutSeconds} с.");
                     }
                     else
                     {
@@ -266,7 +305,7 @@ internal sealed class Cm108PttController : IAsyncDisposable
             }
             return;
         }
-        if (_cosEnabled && _cosBusy)
+        if (_cosEnabled && _cosBusy && !_pttOn)
         {
             if (!_blockedMessageShown)
             {
@@ -287,89 +326,125 @@ internal sealed class Cm108PttController : IAsyncDisposable
             return;
         }
         _blockedMessageShown = false;
-        if (!_pttOn)
-        {
-            SetPttLocked(true, "поступили аудиокадры SIP→радио");
-            if (_pttOn) _pttStartedAt = now;
-        }
+        if (!_pttOn) SetPttLocked(true, "поступили аудиокадры SIP→радио");
     }
 
-    private void SetPttLocked(bool high, string reason)
+    private void SetPttLocked(bool transmit, string reason)
     {
-        if (_pttOn == high) return;
+        if (_pttOn == transmit) return;
         try
         {
-            WritePttLocked(high);
-            _pttOn = high;
-            if (!high) _pttStartedAt = null;
-            _log(high ? $"PTT: GPIO3 HIGH — ПЕРЕДАЧА ВКЛЮЧЕНА ({reason})." : $"PTT: GPIO3 LOW — передача выключена ({reason}).");
+            WritePttForTransmitLocked(transmit);
+            _pttOn = transmit;
+            _pttStartedAt = transmit ? DateTimeOffset.UtcNow : null;
+            bool outputHigh = transmit ? _pttActiveHigh : !_pttActiveHigh;
+            string level = outputHigh ? "HIGH" : "LOW";
+            _log(transmit
+                ? $"PTT: GPIO3 {level} — ПЕРЕДАЧА ВКЛЮЧЕНА ({reason})."
+                : $"PTT: GPIO3 {level} — передача выключена ({reason}).");
         }
         catch (Exception ex)
         {
             _faulted = true;
             _pttRequested = false;
             _pttOn = false;
+            _pttStartedAt = null;
             _log($"PTT: ОШИБКА HID-управления; дальнейшая передача запрещена: {ex.GetType().Name}: {ex.Message}");
-            try
-            {
-                // A failed HIGH/LOW report must never lead to another TX attempt.
-                // Make one independent best-effort attempt to return the line to LOW.
-                WritePttLocked(false);
-                _log("PTT: дополнительная попытка установить GPIO3 LOW выполнена.");
-            }
-            catch (Exception lowError)
-            {
-                _log($"PTT: критическая ошибка — не удалось повторно установить GPIO3 LOW: {lowError.Message}");
-            }
+            TryWriteIdleLocked("аварийная попытка после ошибки PTT");
         }
     }
 
-    private void WritePttLocked(bool high)
+    private void WritePttForTransmitLocked(bool transmit)
+    {
+        bool outputHigh = transmit ? _pttActiveHigh : !_pttActiveHigh;
+        WritePttOutputLevelLocked(outputHigh);
+    }
+
+    private void WritePttOutputLevelLocked(bool outputHigh)
     {
         if (_fd < 0) throw new IOException("CM108 HID уже закрыт.");
         // hidraw write: report ID 0 + HID_OR0 + HID_OR1 + HID_OR2 + HID_OR3.
         // GPIO3 output mode: OR2 bit 2 = 1; GPIO3 level: OR1 bit 2.
-        byte[] report = { 0x00, 0x00, high ? Gpio3Mask : (byte)0x00, Gpio3Mask, 0x00 };
-        nint written = Native.write(_fd, report, (nuint)report.Length);
-        if (written != (nint)report.Length)
+        byte[] report = { 0x00, 0x00, outputHigh ? Gpio3Mask : (byte)0x00, Gpio3Mask, 0x00 };
+        for (int attempt = 1; attempt <= 3; attempt++)
         {
+            nint written = Native.write(_fd, report, (nuint)report.Length);
+            if (written == (nint)report.Length) return;
             int error = Marshal.GetLastPInvokeError();
-            throw new IOException($"Запись HID-отчёта PTT не выполнена полностью (written={written}, errno={error}).");
+            if (written < 0 && error == Eintr) continue;
+            if (written < 0 && error == Eagain && attempt < 3)
+            {
+                Thread.Sleep(10);
+                continue;
+            }
+            throw new IOException($"Запись HID-отчёта GPIO3 не выполнена полностью (written={written}, errno={error}).");
+        }
+    }
+
+    private void TryWriteIdleLocked(string reason)
+    {
+        if (_fd < 0) return;
+        bool outputHigh = !_pttActiveHigh;
+        int succeeded = 0;
+        Exception? lastError = null;
+        // Re-send the inactive state several times. This is deliberately done on startup,
+        // Ctrl+C/SIGTERM and disposal so a single lost USB/HID report cannot leave TX keyed.
+        for (int i = 0; i < 3; i++)
+        {
+            try
+            {
+                WritePttOutputLevelLocked(outputHigh);
+                succeeded++;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+            if (i < 2) Thread.Sleep(20);
+        }
+        if (succeeded > 0)
+        {
+            _pttOn = false;
+            string idle = outputHigh ? "HIGH" : "LOW";
+            _log($"PTT: аварийный уровень GPIO3 {idle} ({reason}); успешно отправлено отчётов: {succeeded}/3.");
+        }
+        else if (lastError != null)
+        {
+            _log($"PTT: КРИТИЧЕСКАЯ ОШИБКА — не удалось установить безопасный уровень GPIO3 ({reason}): {lastError.Message}");
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        int fdToClose;
+        if (_disposed) return;
+        _stop.Cancel();
         lock (_gate)
         {
             if (_disposed) return;
             _pttRequested = false;
-            if (_fd >= 0)
-            {
-                try
-                {
-                    WritePttLocked(false);
-                    _pttOn = false;
-                    _log("PTT: GPIO3 LOW при остановке CM108-контроллера.");
-                }
-                catch (Exception ex)
-                {
-                    _log($"PTT: не удалось отправить GPIO3 LOW при остановке: {ex.Message}");
-                }
-            }
+            _pttStartedAt = null;
+            _totLatched = false;
+            TryWriteIdleLocked("остановка CM108-контроллера");
+            _pttOn = false;
             _disposed = true;
-            fdToClose = _fd;
-            _fd = -1;
         }
-        _stop.Cancel();
-        if (fdToClose >= 0) Native.close(fdToClose);
+
+        // Let poll/read and monitor loops observe cancellation before closing their fd.
         foreach (Task? task in new[] { _readTask, _monitorTask })
         {
             if (task == null) continue;
             try { await task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
-            catch (TimeoutException) { _log("CM108: поток HID не завершился за 2 с после закрытия устройства."); }
+            catch (TimeoutException) { _log("CM108: поток HID не завершился за 2 с при остановке."); }
             catch (OperationCanceledException) { }
+        }
+
+        lock (_gate)
+        {
+            // Final repeated idle report immediately before closing hidraw.
+            TryWriteIdleLocked("последний сброс перед закрытием hidraw");
+            int fd = _fd;
+            _fd = -1;
+            if (fd >= 0) Native.close(fd);
         }
         _stop.Dispose();
     }

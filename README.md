@@ -44,3 +44,8 @@ The test-only incoming-call media source is explicitly set to `Silence`. This va
 
 - Stage 7 (experimental): двусторонний ALSA/RTP тест — `docs/ALSA_RTP_BRIDGE_STAGE7_RU.md`.
 - Stage 8 (experimental): CM108 GPIO3 PTT + COS через VOLDN — `docs/PTT_COS_STAGE8_RU.md`. PTT выключен по умолчанию.
+
+
+## CM108 PTT/COS (experimental)
+
+`Transmit.PttActiveLevel = High|Low` выбирает активный уровень GPIO3, `Transmit.CosActiveHigh` независимо задаёт полярность COS/VOLDN. При `VoxEnabled=false` любой входящий RTP-пакет, в том числе тишина, считается активностью для PTT. Подробности: `docs/PTT_COS_STAGE8_FIX1_RU.md`.

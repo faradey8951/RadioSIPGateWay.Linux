@@ -13,11 +13,12 @@ BridgeEnabled = true
 Mode = cm108
 HidrawPath = /dev/hidraw0
 PttEnabled = true
+PttActiveLevel = High
 PttPin = gpio3
 CosSource = voldn
 CosActiveHigh = true
 PttReleaseDelayMs = 250
-VoxEnabled = false
+VoxEnabled = true
 
 [Radio]
 SipToRadioTotSeconds = 180

@@ -18,4 +18,4 @@
 
 ## Аппаратная настройка Stage 8
 
-Для тестовой платы C-Media `0d8c:000c` проверены `/dev/hidraw0`, GPIO3 HIGH = передача, GPIO3 LOW = приём и VOLDN по биту `0x02` первого байта входного HID-отчёта. Подробности и порядок первого теста: `PTT_COS_STAGE8_RU.md`.
+Для тестовой платы C-Media `0d8c:000c` проверены `/dev/hidraw0`, GPIO3 HIGH = передача, GPIO3 LOW = приём и VOLDN по биту `0x02` первого байта входного HID-отчёта. Полярность PTT задаётся `Transmit.PttActiveLevel`, полярность COS независимо задаётся `Transmit.CosActiveHigh`. Подробности и порядок первого теста: `PTT_COS_STAGE8_RU.md`.

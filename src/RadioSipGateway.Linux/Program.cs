@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using RadioSipGateway.Linux.Configuration;
 using RadioSipGateway.Linux.Sip;
 using RadioSipGateway.Linux.Radio;
@@ -45,7 +46,7 @@ internal static class Program
             Console.WriteLine($"Конфигурация прочитана: {Path.GetFullPath(configPath)}");
             Console.WriteLine($"SIP-сервер: {config.Sip.Server}:{config.Sip.Port}");
             Console.WriteLine($"SIP test auto-answer: {(config.Sip.AutoAnswerForRtpTest ? "ВКЛЮЧЁН" : "выключен")}");
-            Console.WriteLine($"PTT: {config.Transmit.Mode}; GPIO3: {(config.Transmit.PttEnabled ? "ВКЛЮЧЁН (HIGH=TX)" : "выключен")}; COS: {(config.Transmit.PttEnabled ? "VOLDN" : "не активен")}; VOX: {(config.Transmit.VoxEnabled ? "включён" : "выключен")}");
+            Console.WriteLine($"PTT: {config.Transmit.Mode}; GPIO3: {(config.Transmit.PttEnabled ? $"активный уровень {config.Transmit.PttActiveLevel.ToUpperInvariant()}" : "выключен")}; COS: {(config.Transmit.PttEnabled ? "VOLDN" : "не активен")}; VOX: {(config.Transmit.VoxEnabled ? "включён" : "выключен")}");
             Console.WriteLine($"ALSA capture: {config.Audio.CaptureDevice}; playback: {config.Audio.PlaybackDevice}; bridge: {(config.Audio.BridgeEnabled ? "ВКЛЮЧЁН" : "выключен")}");
 
             if (checkOnly)
@@ -57,22 +58,34 @@ internal static class Program
             Console.WriteLine(config.Sip.AutoAnswerForRtpTest
                 ? config.Audio.BridgeEnabled
                 ? config.Transmit.PttEnabled
-                    ? "ТЕСТОВЫЙ РЕЖИМ: входящие вызовы используют ALSA/RTP и CM108 PTT/COS. GPIO3 HIGH включает передачу; COS VOLDN блокирует занятой канал."
+                    ? $"ТЕСТОВЫЙ РЕЖИМ: входящие вызовы используют ALSA/RTP и CM108 PTT/COS. Передача активируется уровнем GPIO3 {config.Transmit.PttActiveLevel.ToUpperInvariant()}; COS VOLDN блокирует занятой канал."
                     : "ТЕСТОВЫЙ РЕЖИМ: входящие вызовы будут отвечены с двусторонним ALSA/RTP-аудиомостом. CM108 PTT отключён; передатчик не включается."
                 : "ТЕСТОВЫЙ РЕЖИМ: входящие вызовы будут отвечены тестовой RTP-медиасессией с тишиной. ALSA-аудиомост и CM108 PTT не подключены."
                 : "РЕЖИМ SIP-регистрации: входящие вызовы отклоняются, если SIP.AutoAnswerForRtpTest=false. ALSA-аудиомост и CM108 PTT не подключены.");
             Console.WriteLine("Для остановки нажмите Ctrl+C.");
             using var stopSignal = new CancellationTokenSource();
+            SipRegistrationService? activeSip = null;
             ConsoleCancelEventHandler cancelHandler = (_, e) =>
             {
                 e.Cancel = true;
+                // Synchronous HID release happens before the asynchronous teardown.
+                activeSip?.EmergencyReleasePtt("Ctrl+C");
                 stopSignal.Cancel();
             };
             Console.CancelKeyPress += cancelHandler;
+            EventHandler processExitHandler = (_, _) => activeSip?.EmergencyReleasePtt("ProcessExit");
+            AppDomain.CurrentDomain.ProcessExit += processExitHandler;
+            using PosixSignalRegistration sigTerm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+            {
+                context.Cancel = true;
+                activeSip?.EmergencyReleasePtt("SIGTERM");
+                stopSignal.Cancel();
+            });
 
             try
             {
                 await using var sip = new SipRegistrationService(config.Sip, config.Audio, config.Transmit, config.Vox, config.Radio, Log);
+                activeSip = sip;
                 sip.Start();
                 try
                 {
@@ -82,7 +95,10 @@ internal static class Program
             }
             finally
             {
+                activeSip?.EmergencyReleasePtt("завершение Main");
+                activeSip = null;
                 Console.CancelKeyPress -= cancelHandler;
+                AppDomain.CurrentDomain.ProcessExit -= processExitHandler;
             }
 
             Console.WriteLine("Завершение работы.");
