@@ -6,4 +6,4 @@ OUT="$ROOT/artifacts/linux-x64"
 mkdir -p "$OUT"
 dotnet publish "$PROJECT" -c Release -r linux-x64 --self-contained false -p:UseAppHost=true -o "$OUT"
 printf '\nPublished files: %s\n' "$OUT"
-printf 'Note: this scaffold currently supports config validation only; SIP/audio/PTT runtime is not implemented yet.\n'
+printf 'Note: SIP, ALSA/RTP and CM108 PTT/COS remain experimental; see docs/PORTING_STATUS_RU.md.\n'

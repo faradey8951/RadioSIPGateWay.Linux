@@ -1,0 +1,24 @@
+# Вставить/объединить в config/radiogateway.local.ini.
+# Не публиковать локальный файл: он содержит SIP пароль.
+
+[SIP]
+AutoAnswerForRtpTest = true
+
+[Audio]
+CaptureDevice = plughw:1,0
+PlaybackDevice = plughw:1,0
+BridgeEnabled = true
+
+[Transmit]
+Mode = cm108
+HidrawPath = /dev/hidraw0
+PttEnabled = true
+PttPin = gpio3
+CosSource = voldn
+CosActiveHigh = true
+PttReleaseDelayMs = 250
+VoxEnabled = false
+
+[Radio]
+SipToRadioTotSeconds = 180
+SipToRadioTotLockoutSeconds = 10

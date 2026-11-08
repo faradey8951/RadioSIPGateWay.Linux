@@ -2,7 +2,7 @@
 
 Отдельная консольная версия радиошлюза для Debian x86-64, основанная на логике проекта `RadioSipGateway_stage28`.
 
-**Текущий статус: SIP-регистрация и тестовая входящая SIP/SDP/RTP-сессия; это не готовый радиошлюз.** Реализованы каркас .NET 8 Console, проверка INI-конфигурации, SIP REGISTER через UDP, Digest-аутентификация через SIPSorcery, повторные попытки после окончательного отказа и обнаружение входящих INVITE. Для изолированной проверки добавлен выключенный по умолчанию `SIP.AutoAnswerForRtpTest`: при включении вызов принимается тестовой send-only медиасессией SIPSorcery. Она не соединена с ALSA и не является двусторонним аудиомостом. Исходящие вызовы, ALSA и CM108 PTT ещё не подключены.
+**Текущий статус: экспериментальные SIP/SDP/RTP, ALSA/RTP и CM108 PTT/COS этапы; это ещё не готовый радиошлюз.** Реализованы SIP REGISTER/обнаружение INVITE, тестовый auto-answer, двусторонний ALSA/RTP мост G.711 и опциональное управление GPIO3 CM108 с COS на VOLDN. Сборка и полноценный реальный аудиотест/PTT-тест должны быть подтверждены на целевом Debian. PTT выключен по умолчанию и требует явного `Transmit.PttEnabled=true`. Исходящие вызовы и полная радио-логика Windows-версии ещё не портированы.
 
 - [Статус переноса](docs/PORTING_STATUS_RU.md)
 - [Проверка SIP-регистрации с Yate](docs/SIP_REGISTER_TEST_RU.md)
@@ -42,4 +42,5 @@ dotnet run --project src/RadioSipGateway.Linux -- --check-config --config config
 
 The test-only incoming-call media source is explicitly set to `Silence`. This validates SIP/SDP/RTP negotiation without sending music or test tones. It does not implement the ALSA audio bridge or CM108 PTT. See `docs/SIP_RTP_TEST_RU.md`.
 
-- Stage 7 (experimental): двусторонний ALSA/RTP тест без PTT — `docs/ALSA_RTP_BRIDGE_STAGE7_RU.md`.
+- Stage 7 (experimental): двусторонний ALSA/RTP тест — `docs/ALSA_RTP_BRIDGE_STAGE7_RU.md`.
+- Stage 8 (experimental): CM108 GPIO3 PTT + COS через VOLDN — `docs/PTT_COS_STAGE8_RU.md`. PTT выключен по умолчанию.

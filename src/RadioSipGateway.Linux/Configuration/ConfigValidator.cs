@@ -12,6 +12,11 @@ internal static class ConfigValidator
         if (c.Audio.SampleRate is not (8000 or 16000 or 32000 or 44100 or 48000)) throw new InvalidOperationException("Audio.SampleRate: допустимы 8000, 16000, 32000, 44100 или 48000.");
         if (c.Transmit.Mode is not ("cm108" or "vox" or "none")) throw new InvalidOperationException("Transmit.Mode должен быть cm108, vox или none.");
         if (c.Transmit.PttReleaseDelayMs < 0 || c.Transmit.PttReleaseDelayMs > 5000) throw new InvalidOperationException("Transmit.PttReleaseDelayMs должен быть в диапазоне 0..5000.");
+        if (c.Transmit.PttEnabled && c.Transmit.Mode != "cm108") throw new InvalidOperationException("Transmit.PttEnabled=true поддерживается только при Transmit.Mode=cm108.");
+        if (c.Transmit.PttEnabled && string.IsNullOrWhiteSpace(c.Transmit.HidrawPath)) throw new InvalidOperationException("Для Transmit.PttEnabled=true необходимо задать Transmit.HidrawPath, например /dev/hidraw0.");
+        if (c.Transmit.PttPin != "gpio3") throw new InvalidOperationException("На данном этапе поддерживается только Transmit.PttPin=gpio3.");
+        if (c.Transmit.CosSource != "voldn") throw new InvalidOperationException("На данном этапе поддерживается только Transmit.CosSource=voldn.");
+        if (c.Transmit.PttEnabled && (!c.Audio.BridgeEnabled || !c.Sip.AutoAnswerForRtpTest)) throw new InvalidOperationException("Для тестового PTT включите SIP.AutoAnswerForRtpTest=true и Audio.BridgeEnabled=true.");
         if (c.Vox.ThresholdDbfs < -120 || c.Vox.ThresholdDbfs > -1) throw new InvalidOperationException("VOX.ThresholdDbfs должен быть в диапазоне -120..-1 dBFS.");
         if (c.Vox.ActivationDelayMs < 0 || c.Vox.ActivationDelayMs > 5000) throw new InvalidOperationException("VOX.ActivationDelayMs должен быть в диапазоне 0..5000.");
         if (c.Vox.ReleaseDelayMs < 50 || c.Vox.ReleaseDelayMs > 10000) throw new InvalidOperationException("VOX.ReleaseDelayMs должен быть в диапазоне 50..10000.");
@@ -23,6 +28,7 @@ internal static class ConfigValidator
         Percent(c.Radio.IncomingRadioAlertLevelPercent, "Radio.IncomingRadioAlertLevelPercent");
         Percent(c.Radio.RingbackToneLevelPercent, "Radio.RingbackToneLevelPercent");
         if (c.Radio.SipToRadioTotSeconds < 0 || c.Radio.SipToRadioTotSeconds > 3600) throw new InvalidOperationException("Radio.SipToRadioTotSeconds должен быть в диапазоне 0..3600.");
+        if (c.Radio.SipToRadioTotLockoutSeconds < 0 || c.Radio.SipToRadioTotLockoutSeconds > 3600) throw new InvalidOperationException("Radio.SipToRadioTotLockoutSeconds должен быть в диапазоне 0..3600.");
         if (c.Radio.GlobalTotSeconds < 0 || c.Radio.GlobalTotSeconds > 86400) throw new InvalidOperationException("Radio.GlobalTotSeconds должен быть в диапазоне 0..86400.");
     }
 

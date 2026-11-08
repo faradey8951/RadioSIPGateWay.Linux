@@ -37,6 +37,12 @@ internal sealed class TransmitConfig
     public string Mode { get; set; } = "cm108";
     public bool VoxEnabled { get; set; } = false;
     public string HidrawPath { get; set; } = "";
+    /// <summary>Explicit opt-in: key CM108 GPIO3 while remote SIP audio is active.</summary>
+    public bool PttEnabled { get; set; } = false;
+    public string PttPin { get; set; } = "gpio3";
+    public string CosSource { get; set; } = "voldn";
+    /// <summary>When true, VOLDN bit set means radio channel busy.</summary>
+    public bool CosActiveHigh { get; set; } = true;
     public int PttReleaseDelayMs { get; set; } = 250;
 }
 

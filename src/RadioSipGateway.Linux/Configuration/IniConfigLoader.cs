@@ -50,6 +50,10 @@ internal static class IniConfigLoader
         config.Transmit.Mode = Get(values, "Transmit.Mode", config.Transmit.Mode).ToLowerInvariant();
         config.Transmit.VoxEnabled = GetBool(values, "Transmit.VoxEnabled", config.Transmit.VoxEnabled);
         config.Transmit.HidrawPath = Get(values, "Transmit.HidrawPath", config.Transmit.HidrawPath);
+        config.Transmit.PttEnabled = GetBool(values, "Transmit.PttEnabled", config.Transmit.PttEnabled);
+        config.Transmit.PttPin = Get(values, "Transmit.PttPin", config.Transmit.PttPin).ToLowerInvariant();
+        config.Transmit.CosSource = Get(values, "Transmit.CosSource", config.Transmit.CosSource).ToLowerInvariant();
+        config.Transmit.CosActiveHigh = GetBool(values, "Transmit.CosActiveHigh", config.Transmit.CosActiveHigh);
         config.Transmit.PttReleaseDelayMs = GetInt(values, "Transmit.PttReleaseDelayMs", config.Transmit.PttReleaseDelayMs);
         config.Vox.ThresholdDbfs = GetInt(values, "VOX.ThresholdDbfs", config.Vox.ThresholdDbfs);
         config.Vox.ActivationDelayMs = GetInt(values, "VOX.ActivationDelayMs", config.Vox.ActivationDelayMs);

@@ -17,6 +17,9 @@ internal sealed class SipRegistrationService : IAsyncDisposable
 {
     private readonly SipConfig _config;
     private readonly AudioConfig _audioConfig;
+    private readonly TransmitConfig _transmitConfig;
+    private readonly VoxConfig _voxConfig;
+    private readonly RadioConfig _radioConfig;
     private readonly Action<string> _log;
     private readonly Channel<byte> _retryRequests = Channel.CreateBounded<byte>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true, SingleWriter = false });
@@ -26,6 +29,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
     private SIPUserAgent? _callUserAgent;
     private VoIPMediaSession? _activeTestMedia;
     private AlsaAudioBridge? _activeAudioBridge;
+    private Cm108PttController? _pttController;
     private Task? _retryWorker;
     private int _retryAttempt;
     private int _retryQueued;
@@ -33,10 +37,13 @@ internal sealed class SipRegistrationService : IAsyncDisposable
     private volatile bool _registered;
     private volatile bool _stopping;
 
-    public SipRegistrationService(SipConfig config, AudioConfig audioConfig, Action<string> log)
+    public SipRegistrationService(SipConfig config, AudioConfig audioConfig, TransmitConfig transmitConfig, VoxConfig voxConfig, RadioConfig radioConfig, Action<string> log)
     {
         _config = config;
         _audioConfig = audioConfig;
+        _transmitConfig = transmitConfig;
+        _voxConfig = voxConfig;
+        _radioConfig = radioConfig;
         _log = log;
     }
 
@@ -56,6 +63,22 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             transport.AddSIPChannel(new SIPUDPChannel(new IPEndPoint(IPAddress.Any, _config.LocalPort)));
             _transport = transport;
 
+            if (_transmitConfig.PttEnabled)
+            {
+                _pttController = new Cm108PttController(
+                    _transmitConfig.HidrawPath,
+                    cosEnabled: true,
+                    cosActiveHigh: _transmitConfig.CosActiveHigh,
+                    releaseDelayMs: _transmitConfig.VoxEnabled
+                        ? Math.Max(_transmitConfig.PttReleaseDelayMs, _voxConfig.ReleaseDelayMs)
+                        : _transmitConfig.PttReleaseDelayMs,
+                    totSeconds: _radioConfig.SipToRadioTotSeconds,
+                    totLockoutSeconds: _radioConfig.SipToRadioTotLockoutSeconds,
+                    _log);
+                _pttController.Start();
+                _log("SIP: CM108 PTT/COS-контроллер готов; GPIO3 HIGH = передача, LOW = приём.");
+            }
+
             // SIPSorcery's incoming-call event is Action-based; async work is launched explicitly.
             _callUserAgent = new SIPUserAgent(transport, null, true);
             _callUserAgent.OnIncomingCall += (ua, request) => _ = HandleIncomingCallAsync(ua, request);
@@ -67,11 +90,18 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             _log(!_config.AutoAnswerForRtpTest
                 ? "SIP: входящие INVITE обнаруживаются; тестовый автоответ выключен, вызовы отклоняются с 503."
                 : _audioConfig.BridgeEnabled
-                    ? "SIP: тестовый автоответ включён; при вызове запускается двусторонний ALSA/RTP мост, PTT отключён."
+                    ? _transmitConfig.PttEnabled
+                        ? "SIP: тестовый автоответ включён; при вызове запускается ALSA/RTP мост с CM108 PTT/COS."
+                        : "SIP: тестовый автоответ включён; при вызове запускается двусторонний ALSA/RTP мост, PTT отключён."
                     : "SIP: тестовый автоответ включён; используется RTP-медиасессия с тишиной, без ALSA/PTT.");
         }
         catch
         {
+            if (_pttController != null)
+            {
+                try { _pttController.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+                _pttController = null;
+            }
             try { transport.Shutdown(); } catch { }
             _transport = null;
             throw;
@@ -172,9 +202,11 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             AlsaAudioBridge? audioBridge = null;
             if (_audioConfig.BridgeEnabled)
             {
-                audioBridge = new AlsaAudioBridge(_audioConfig, _log);
+                audioBridge = new AlsaAudioBridge(_audioConfig, _transmitConfig, _voxConfig, _pttController, _log);
                 audioBridge.Attach(mediaSession);
-                _log("SIP: включён двусторонний ALSA/RTP аудиомост. PTT/GPIO остаётся отключённым.");
+                _log(_transmitConfig.PttEnabled
+                    ? "SIP: включён ALSA/RTP-мост с CM108 PTT GPIO3 и COS VOLDN."
+                    : "SIP: включён двусторонний ALSA/RTP аудиомост. PTT/GPIO остаётся отключённым.");
             }
             else
             {
@@ -200,7 +232,9 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             {
                 _activeAudioBridge = audioBridge;
                 await audioBridge.StartAsync().ConfigureAwait(false);
-                _log($"SIP: вызов от {caller} принят; двусторонний ALSA/RTP аудиомост запущен. PTT не задействован.");
+                _log(_transmitConfig.PttEnabled
+                    ? $"SIP: вызов от {caller} принят; ALSA/RTP и CM108 PTT/COS активны."
+                    : $"SIP: вызов от {caller} принят; двусторонний ALSA/RTP аудиомост запущен. PTT не задействован.");
             }
             else
             {
@@ -213,6 +247,8 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             {
                 try { mediaSession.Close("Incoming test call failed"); } catch { }
                 try { mediaSession.Dispose(); } catch { }
+                if (ReferenceEquals(_activeTestMedia, mediaSession))
+                    _activeTestMedia = null;
             }
             var failedBridge = Interlocked.Exchange(ref _activeAudioBridge, null);
             if (failedBridge != null) _ = failedBridge.DisposeAsync();
@@ -220,6 +256,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             {
                 try { serverUserAgent.Reject(SIPResponseStatusCodesEnum.ServiceUnavailable, "RTP test setup failed"); } catch { }
             }
+            _pttController?.ReleaseTransmit("ошибка обработки SIP-вызова");
             Interlocked.Exchange(ref _callInProgress, 0);
             _log($"SIP: ошибка обработки INVITE от {caller}: {ex.Message}");
         }
@@ -236,6 +273,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
     {
         var bridge = Interlocked.Exchange(ref _activeAudioBridge, null);
         if (bridge != null) _ = bridge.DisposeAsync();
+        _pttController?.ReleaseTransmit("SIP-вызов завершён");
         var media = Interlocked.Exchange(ref _activeTestMedia, null);
         if (media != null)
         {
@@ -299,6 +337,12 @@ internal sealed class SipRegistrationService : IAsyncDisposable
         {
             try { media.Close("Service stopping"); } catch { }
             try { media.Dispose(); } catch { }
+        }
+        if (_pttController != null)
+        {
+            try { await _pttController.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _log($"PTT: ошибка остановки CM108-контроллера: {ex.Message}"); }
+            _pttController = null;
         }
         try { _callUserAgent?.Dispose(); } catch (Exception ex) { _log($"SIP: предупреждение при остановке SIPUserAgent: {ex.Message}"); }
         _callUserAgent = null;

@@ -9,9 +9,8 @@ using SIPSorceryMedia.Abstractions;
 namespace RadioSipGateway.Linux.Radio;
 
 /// <summary>
-/// First-pass Linux ALSA/RTP bridge. ALSA is accessed via arecord/aplay so no native
-/// ALSA bindings are required. Audio is mono signed 16-bit PCM at 8 kHz (20 ms frames).
-/// This class deliberately does not control PTT.
+/// Linux ALSA/RTP bridge. ALSA is accessed via arecord/aplay so no native ALSA
+/// bindings are required. Audio is mono signed 16-bit PCM at 8 kHz (20 ms frames).
 /// </summary>
 internal sealed class AlsaAudioBridge : IAsyncDisposable
 {
@@ -20,7 +19,11 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
     private const int BytesPerFrame = SamplesPerFrame * sizeof(short);
 
     private readonly AudioConfig _config;
+    private readonly TransmitConfig _transmitConfig;
+    private readonly VoxConfig _voxConfig;
+    private readonly Cm108PttController? _ptt;
     private readonly Action<string> _log;
+    private DateTimeOffset? _voxAboveSince;
     private readonly AudioEncoder _encoder = new();
     private readonly Channel<short[]> _playbackQueue = Channel.CreateBounded<short[]>(
         new BoundedChannelOptions(25) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true, SingleWriter = false });
@@ -33,9 +36,12 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
     private VoIPMediaSession? _media;
     private int _started;
 
-    public AlsaAudioBridge(AudioConfig config, Action<string> log)
+    public AlsaAudioBridge(AudioConfig config, TransmitConfig transmitConfig, VoxConfig voxConfig, Cm108PttController? ptt, Action<string> log)
     {
         _config = config;
+        _transmitConfig = transmitConfig;
+        _voxConfig = voxConfig;
+        _ptt = ptt;
         _log = log;
     }
 
@@ -67,13 +73,43 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
                 AudioFormat? format = _negotiatedFormat;
                 if (!format.HasValue) return;
                 short[] pcm = _encoder.DecodeAudio(packet.Payload, format.Value);
-                if (pcm.Length > 0) _playbackQueue.Writer.TryWrite(pcm);
+                if (pcm.Length > 0)
+                {
+                    _playbackQueue.Writer.TryWrite(pcm);
+                    if (_ptt != null && IsRemoteAudioActive(pcm)) _ptt.NotifyRemoteAudio();
+                }
             }
             catch (Exception ex)
             {
                 _log($"ALSA/RTP: ошибка декодирования входящего аудио: {ex.Message}");
             }
         };
+    }
+
+    private bool IsRemoteAudioActive(short[] samples)
+    {
+        if (!_transmitConfig.VoxEnabled)
+        {
+            _voxAboveSince = DateTimeOffset.UtcNow;
+            return true;
+        }
+
+        double sum = 0;
+        foreach (short sample in samples)
+        {
+            double normalized = sample / 32768.0;
+            sum += normalized * normalized;
+        }
+        double rms = Math.Sqrt(sum / samples.Length);
+        double dbfs = rms <= 0 ? -120.0 : 20.0 * Math.Log10(rms);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (dbfs >= _voxConfig.ThresholdDbfs)
+        {
+            _voxAboveSince ??= now;
+            return now - _voxAboveSince.Value >= TimeSpan.FromMilliseconds(_voxConfig.ActivationDelayMs);
+        }
+        _voxAboveSince = null;
+        return false;
     }
 
     public Task StartAsync()
@@ -88,7 +124,7 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
 
             _playbackTask = Task.Run(PlaybackLoopAsync);
             _captureTask = Task.Run(CaptureLoopAsync);
-            _log($"ALSA: аудиомост запущен; capture={_config.CaptureDevice}, playback={_config.PlaybackDevice}, PCM mono S16_LE {SampleRate} Hz. PTT не задействован.");
+            _log($"ALSA: аудиомост запущен; capture={_config.CaptureDevice}, playback={_config.PlaybackDevice}, PCM mono S16_LE {SampleRate} Hz; PTT={(_ptt == null ? "выключен" : "CM108 GPIO3/COS VOLDN")}.");
             return Task.CompletedTask;
         }
         catch
@@ -176,7 +212,11 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            if (!_stop.IsCancellationRequested) _log($"ALSA: ошибка воспроизведения звука (aplay): {ex.Message}");
+            if (!_stop.IsCancellationRequested)
+            {
+                _log($"ALSA: ошибка воспроизведения звука (aplay): {ex.Message}");
+                _ptt?.ReleaseTransmit("ошибка воспроизведения ALSA");
+            }
         }
     }
 
@@ -192,6 +232,7 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
         if (_stop.IsCancellationRequested) return;
         _stop.Cancel();
         _playbackQueue.Writer.TryComplete();
+        _ptt?.ReleaseTransmit("ALSA/RTP-мост останавливается");
         StopProcess(_capture);
         StopProcess(_playback);
         foreach (Task? task in new[] { _captureTask, _playbackTask })
@@ -200,6 +241,6 @@ internal sealed class AlsaAudioBridge : IAsyncDisposable
             try { await task.ConfigureAwait(false); } catch { }
         }
         _stop.Dispose();
-        _log("ALSA: аудиомост остановлен; PTT не задействован.");
+        _log("ALSA: аудиомост остановлен.");
     }
 }
