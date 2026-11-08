@@ -33,6 +33,8 @@ internal static class ConfigValidator
         if (c.Radio.SipToRadioTotSeconds < 0 || c.Radio.SipToRadioTotSeconds > 3600) throw new InvalidOperationException("Radio.SipToRadioTotSeconds должен быть в диапазоне 0..3600.");
         if (c.Radio.SipToRadioTotLockoutSeconds < 0 || c.Radio.SipToRadioTotLockoutSeconds > 3600) throw new InvalidOperationException("Radio.SipToRadioTotLockoutSeconds должен быть в диапазоне 0..3600.");
         if (c.Radio.GlobalTotSeconds < 0 || c.Radio.GlobalTotSeconds > 86400) throw new InvalidOperationException("Radio.GlobalTotSeconds должен быть в диапазоне 0..86400.");
+        if (c.Radio.SipRadioCompressorSpeedMs < 10 || c.Radio.SipRadioCompressorSpeedMs > 1000) throw new InvalidOperationException("Radio.SipRadioCompressorSpeedMs должен быть в диапазоне 10..1000.");
+        if (c.Radio.SipPlaybackGainDb < -24 || c.Radio.SipPlaybackGainDb > 18) throw new InvalidOperationException("Radio.SipPlaybackGainDb должен быть в диапазоне -24..18 дБ.");
     }
 
     private static void Port(int p, string key) { if (p is < 1 or > 65535) throw new InvalidOperationException($"{key} должен быть в диапазоне 1..65535."); }

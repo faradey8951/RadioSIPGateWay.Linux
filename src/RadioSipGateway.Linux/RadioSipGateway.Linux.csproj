@@ -11,4 +11,10 @@
   <ItemGroup>
     <PackageReference Include="SIPSorcery" Version="10.0.17" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="../../assets/samples/callsign.wav" Link="assets/samples/callsign.wav"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../assets/samples/ringing.wav" Link="assets/samples/ringing.wav"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

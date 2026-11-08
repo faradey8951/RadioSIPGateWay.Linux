@@ -63,6 +63,9 @@ internal static class IniConfigLoader
         config.Radio.SipToRadioTotSeconds = GetInt(values, "Radio.SipToRadioTotSeconds", config.Radio.SipToRadioTotSeconds);
         config.Radio.SipToRadioTotLockoutSeconds = GetInt(values, "Radio.SipToRadioTotLockoutSeconds", config.Radio.SipToRadioTotLockoutSeconds);
         config.Radio.GlobalTotSeconds = GetInt(values, "Radio.GlobalTotSeconds", config.Radio.GlobalTotSeconds);
+        config.Radio.SipRadioCompressorEnabled = GetBool(values, "Radio.SipRadioCompressorEnabled", config.Radio.SipRadioCompressorEnabled);
+        config.Radio.SipRadioCompressorSpeedMs = GetInt(values, "Radio.SipRadioCompressorSpeedMs", config.Radio.SipRadioCompressorSpeedMs);
+        config.Radio.SipPlaybackGainDb = GetInt(values, "Radio.SipPlaybackGainDb", config.Radio.SipPlaybackGainDb);
         config.Radio.CourtesyTonesEnabled = GetBool(values, "Radio.CourtesyTonesEnabled", config.Radio.CourtesyTonesEnabled);
         config.Radio.CourtesyToneToRadioLevelPercent = GetInt(values, "Radio.CourtesyToneToRadioLevelPercent", config.Radio.CourtesyToneToRadioLevelPercent);
         config.Radio.CourtesyToneToSipLevelPercent = GetInt(values, "Radio.CourtesyToneToSipLevelPercent", config.Radio.CourtesyToneToSipLevelPercent);

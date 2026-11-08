@@ -13,13 +13,23 @@ BridgeEnabled = true
 Mode = cm108
 HidrawPath = /dev/hidraw0
 PttEnabled = true
-PttActiveLevel = High
+# Для этой платы LOW включает оптопару и PTT; HIGH отпускает PTT.
+PttActiveLevel = Low
 PttPin = gpio3
 CosSource = voldn
+# Установленный бит VOLDN (raw & 0x02) = канал занят.
 CosActiveHigh = true
-PttReleaseDelayMs = 250
+PttReleaseDelayMs = 700
 VoxEnabled = true
+
+[VOX]
+ThresholdDbfs = -45
+ActivationDelayMs = 120
+ReleaseDelayMs = 700
 
 [Radio]
 SipToRadioTotSeconds = 180
 SipToRadioTotLockoutSeconds = 10
+SipRadioCompressorEnabled = true
+SipRadioCompressorSpeedMs = 120
+SipPlaybackGainDb = 6

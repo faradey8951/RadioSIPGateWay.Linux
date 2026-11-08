@@ -39,13 +39,13 @@ internal sealed class TransmitConfig
     public string HidrawPath { get; set; } = "";
     /// <summary>Explicit opt-in: key CM108 GPIO3 while remote SIP audio is active.</summary>
     public bool PttEnabled { get; set; } = false;
-    /// <summary>Electrical level that keys the radio: "high" or "low". The measured CM108 test board uses HIGH.</summary>
-    public string PttActiveLevel { get; set; } = "high";
+    /// <summary>Electrical level that keys the radio: "high" or "low". The tested optocoupler interface keys on LOW.</summary>
+    public string PttActiveLevel { get; set; } = "low";
     public string PttPin { get; set; } = "gpio3";
     public string CosSource { get; set; } = "voldn";
     /// <summary>When true, VOLDN bit set means radio channel busy.</summary>
     public bool CosActiveHigh { get; set; } = true;
-    public int PttReleaseDelayMs { get; set; } = 250;
+    public int PttReleaseDelayMs { get; set; } = 700;
 }
 
 internal sealed class VoxConfig
@@ -60,6 +60,9 @@ internal sealed class RadioConfig
     public int SipToRadioTotSeconds { get; set; } = 180;
     public int SipToRadioTotLockoutSeconds { get; set; } = 10;
     public int GlobalTotSeconds { get; set; } = 0;
+    public bool SipRadioCompressorEnabled { get; set; } = true;
+    public int SipRadioCompressorSpeedMs { get; set; } = 120;
+    public int SipPlaybackGainDb { get; set; } = 6;
     public bool CourtesyTonesEnabled { get; set; } = true;
     public int CourtesyToneToRadioLevelPercent { get; set; } = 45;
     public int CourtesyToneToSipLevelPercent { get; set; } = 25;
@@ -71,8 +74,8 @@ internal sealed class RadioConfig
     public bool ForwardRadioDtmfToSip { get; set; } = true;
     public bool AutoCallOnHash { get; set; } = true;
     public string ManualDialNumber { get; set; } = "";
-    public string CallsignWavPath { get; set; } = "/etc/radiosipgateway/callsign.wav";
-    public string IncomingWavPath { get; set; } = "";
+    public string CallsignWavPath { get; set; } = "/opt/radiosipgateway/assets/samples/callsign.wav";
+    public string IncomingWavPath { get; set; } = "/opt/radiosipgateway/assets/samples/ringing.wav";
     public bool IncomingWavEnabled { get; set; } = false;
 }
 

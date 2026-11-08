@@ -48,4 +48,9 @@ The test-only incoming-call media source is explicitly set to `Silence`. This va
 
 ## CM108 PTT/COS (experimental)
 
-`Transmit.PttActiveLevel = High|Low` выбирает активный уровень GPIO3, `Transmit.CosActiveHigh` независимо задаёт полярность COS/VOLDN. При `VoxEnabled=false` любой входящий RTP-пакет, в том числе тишина, считается активностью для PTT. Подробности: `docs/PTT_COS_STAGE8_FIX1_RU.md`.
+`Transmit.PttActiveLevel = High|Low` выбирает активный уровень GPIO3 (для проверенной оптоплатки — `Low`), `Transmit.CosActiveHigh` независимо задаёт полярность COS/VOLDN. При `VoxEnabled=false` любой входящий RTP-пакет, в том числе тишина, считается активностью для PTT. Подробности: `docs/PTT_COS_STAGE8_FIX1_RU.md`.
+
+
+## Stage 9
+
+Перенос DSP Stage 42, CM108 с PTT active-low, устранение ALSA playback underrun при RTP-паузах и доставка WAV-образцов: см. `docs/STAGE9_DSP_AND_WAV_ASSETS_RU.md`.

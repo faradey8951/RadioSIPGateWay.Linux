@@ -24,6 +24,12 @@ install -d -m 0750 -o radiosipgateway -g radiosipgateway /var/log/radiosipgatewa
 
 install -m 0755 "$PUBLISH/RadioSipGateway" /opt/radiosipgateway/RadioSipGateway
 find "$PUBLISH" -maxdepth 1 -type f ! -name RadioSipGateway -exec install -m 0644 {} /opt/radiosipgateway/ \;
+if [[ -d "$PUBLISH/assets" ]]; then
+  install -d -m 0755 /opt/radiosipgateway/assets
+  cp -a "$PUBLISH/assets/." /opt/radiosipgateway/assets/
+  find /opt/radiosipgateway/assets -type d -exec chmod 0755 {} \;
+  find /opt/radiosipgateway/assets -type f -exec chmod 0644 {} \;
+fi
 chown -R root:root /opt/radiosipgateway
 chmod 0755 /opt/radiosipgateway/RadioSipGateway
 
@@ -35,6 +41,6 @@ fi
 install -m 0644 "$ROOT/deploy/radiosipgateway.service" /etc/systemd/system/radiosipgateway.service
 systemctl daemon-reload
 
-echo "Установка файлов завершена. Пока что приложение поддерживает проверку конфига, но ещё не готово для работы как радиошлюз."
+echo "Установка файлов и WAV-образцов завершена. Sample assets: /opt/radiosipgateway/assets/samples/."
 echo "Проверьте конфиг: sudo -u radiosipgateway /opt/radiosipgateway/RadioSipGateway --check-config --config /etc/radiosipgateway/config.ini"
 echo "Не запускайте службу до завершения Linux-порта SIP/ALSA/CM108 PTT."

@@ -203,7 +203,7 @@ internal sealed class SipRegistrationService : IAsyncDisposable
             AlsaAudioBridge? audioBridge = null;
             if (_audioConfig.BridgeEnabled)
             {
-                audioBridge = new AlsaAudioBridge(_audioConfig, _transmitConfig, _voxConfig, _pttController, _log);
+                audioBridge = new AlsaAudioBridge(_audioConfig, _transmitConfig, _voxConfig, _radioConfig, _pttController, _log);
                 audioBridge.Attach(mediaSession);
                 _log(_transmitConfig.PttEnabled
                     ? "SIP: включён ALSA/RTP-мост с CM108 PTT GPIO3 и COS VOLDN."
